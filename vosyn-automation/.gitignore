@@ -1,0 +1,42 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Environment variables (IMPORTANT - keeps credentials safe)
+.env
+
+# Data files
+data/*.xlsx
+!data/.gitkeep
+
+# Screenshots
+screenshots/*.png
+!screenshots/.gitkeep
+
+# Logs
+logs/*.log
+!logs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log

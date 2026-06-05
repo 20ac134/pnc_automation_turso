@@ -1,0 +1,156 @@
+name: Test Mac Setup
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "launcher/mac/**"
+      - "vosyn-automation/requirements.txt"
+      - "university-job-portal/university-job-portal/package.json"
+      - "university-job-portal/university-job-portal/package-lock.json"
+      - ".github/workflows/test.yml"
+      - ".github/workflows/test-mac-setup.yml"
+
+  pull_request:
+    branches: [main, master]
+
+  workflow_dispatch:
+
+jobs:
+  test-mac-setup:
+    name: Run setup.sh on fresh macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show runner environment
+        run: |
+          echo "macOS version: $(sw_vers -productVersion)"
+          echo "Arch:          $(uname -m)"
+          echo "Shell:         $SHELL"
+          echo "Python:        $(python3 --version 2>&1 || echo none)"
+          echo "Node:          $(node --version 2>&1 || echo none)"
+          echo "npm:           $(npm --version 2>&1 || echo none)"
+          echo "Homebrew:      $(brew --version 2>&1 | head -1 || echo none)"
+
+      - name: Stub Chrome
+        run: |
+          sudo mkdir -p "/Applications/Google Chrome.app/Contents/MacOS"
+          sudo touch "/Applications/Google Chrome.app/Contents/Info.plist"
+
+      - name: Make Mac scripts executable
+        run: chmod +x launcher/mac/*.sh
+
+      - name: Run Mac setup script
+        run: ./launcher/mac/setup.sh
+
+      - name: Verify backend venv was created and is healthy
+        run: |
+          cd vosyn-automation
+          test -x env/bin/python || { echo "FAIL: env/bin/python missing"; exit 1; }
+          env/bin/python -c "import sys; print(f'venv python: {sys.version}')"
+
+      - name: Verify critical backend packages import successfully
+        run: |
+          cd vosyn-automation
+          env/bin/python - <<'PY'
+          import importlib
+          import sys
+
+          required = [
+              "fastapi",
+              "uvicorn",
+              "pandas",
+              "undetected_chromedriver",
+              "google.generativeai",
+              "selenium",
+              "openpyxl",
+          ]
+
+          missing = []
+
+          for mod in required:
+              try:
+                  importlib.import_module(mod)
+                  print(f"ok {mod}")
+              except ImportError as e:
+                  print(f"FAIL {mod} -- {e}")
+                  missing.append(mod)
+
+          if missing:
+              print(f"\nMissing packages: {missing}")
+              print("Add them to requirements.txt")
+              sys.exit(1)
+
+          print("\nAll critical packages importable.")
+          PY
+
+      - name: Verify api.py imports cleanly
+        run: |
+          cd vosyn-automation
+          env/bin/python - <<'PY'
+          import sys
+          import traceback
+
+          try:
+              from src.API import api
+              print("api.py imports cleanly")
+          except Exception:
+              print("FAIL: api.py raised on import:")
+              traceback.print_exc()
+              sys.exit(1)
+          PY
+
+      - name: Verify uvicorn can boot the backend
+        run: |
+          cd vosyn-automation
+
+          env/bin/python -m uvicorn src.API.api:app --host 127.0.0.1 --port 8000 > /tmp/pnc-ci-backend.log 2>&1 &
+          UVICORN_PID=$!
+
+          for i in {1..30}; do
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ || true)
+
+            if echo "$STATUS_CODE" | grep -qE "^[2-4][0-9][0-9]$"; then
+              echo "Backend responded after ${i}s with status $STATUS_CODE"
+              break
+            fi
+
+            if ! kill -0 $UVICORN_PID 2>/dev/null; then
+              echo "FAIL: uvicorn exited during startup"
+              echo "Last backend logs:"
+              tail -n 50 /tmp/pnc-ci-backend.log
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ || true)
+
+          if ! echo "$STATUS_CODE" | grep -qE "^[2-4][0-9][0-9]$"; then
+            echo "FAIL: Backend did not respond within 30s"
+            echo "Last backend logs:"
+            tail -n 50 /tmp/pnc-ci-backend.log
+            kill $UVICORN_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Backend smoke test PASSED"
+
+          kill $UVICORN_PID 2>/dev/null || true
+          wait $UVICORN_PID 2>/dev/null || true
+
+      - name: Verify frontend node_modules installed
+        run: |
+          cd university-job-portal/university-job-portal
+          test -d node_modules || { echo "FAIL: node_modules missing"; exit 1; }
+          test -d node_modules/react || { echo "FAIL: react not installed"; exit 1; }
+          echo "Frontend deps OK"
+
+      - name: Verify frontend builds
+        run: |
+          cd university-job-portal/university-job-portal
+          npm run build

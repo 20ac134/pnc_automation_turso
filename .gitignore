@@ -1,0 +1,106 @@
+# =============================================================
+# .gitignore — PnC Automation Tool
+# =============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+env/
+venv/
+.venv/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / Frontend ---
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.vite/
+
+# npm / yarn / pnpm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Secrets — NEVER commit ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets.json
+service-account*.json
+
+# --- IDEs / editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS clutter ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Logs ---
+*.log
+logs/
+/tmp/pnc-*.log
+
+# --- Browser automation artifacts ---
+# undetected_chromedriver downloads/patches a chromedriver binary at runtime
+chromedriver*
+!chromedriver.md
+chrome_profile/
+selenium_user_data/
+user_data/
+*.crdownload
+
+# --- Project-specific outputs ---
+# Runtime data your code generates (adjust to your actual usage)
+output/
+exports/
+screenshots/
+downloads/
+*.tmp
+
+# --- Installer downloads ---
+# setup_windows.bat and setup_mac.sh download these to TEMP, but in case
+# anyone ever pulls one into the repo:
+python-*-installer.exe
+node-*-installer.msi
+*.dmg
+
+
+vosyn-automation/reports/

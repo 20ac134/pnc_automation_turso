@@ -1,0 +1,68 @@
+=====================================
+PnC Automation Tool — How to Run
+=====================================
+
+REQUIREMENTS
+- Windows 10 or 11
+- Google Chrome installed
+- Internet connection
+
+-------------------------------------
+STEP 1: Extract the project
+-------------------------------------
+After extracting the zip, you should see 3 folders and 3 .bat files
+in the project root.
+
+-------------------------------------
+STEP 2: Run setup_windows.bat
+-------------------------------------
+Double-click setup.bat in the project root.
+
+You may see TWO different prompts:
+
+  PROMPT 1 — "Windows protected your PC"
+    A blue window saying Windows blocked an unrecognized app.
+    Click "More info" — a new "Run anyway" button appears.
+    Click "Run anyway".
+
+  PROMPT 2 — "Do you want to allow this app to make changes
+              to your device?"
+    Standard Windows UAC prompt.
+    Click YES.
+
+You will need to run setup_windows.bat THREE separate times:
+
+  Run 1 — installs Python.
+          When it finishes, it tells you to close the window
+          and run setup again. Press any key, close, and continue.
+
+  Run 2 — installs Node.js.
+          Same thing — tells you to close and re-run.
+
+  Run 3 — installs all project dependencies.
+          When you see "Setup complete." — you're done.
+
+Each click of setup_windows.bat asks for the UAC prompt again.
+The "Windows protected your PC" prompt usually only appears the
+first time. Always click through both prompts.
+
+-------------------------------------
+STEP 3: Run the app
+-------------------------------------
+Open the "launchers" folder, then the "windows" subfolder.
+
+Double-click: start_pnc_tool_windows.bat
+
+You may see the "Windows protected your PC" prompt again on the
+first run — click "More info" then "Run anyway".
+
+Three windows will open:
+  - Launcher window
+  - PnC Backend window
+  - PnC Frontend window
+
+Your browser will automatically open to the app.
+
+KEEP ALL THREE WINDOWS OPEN while using the app.
+To stop the app, close those windows.
+
