@@ -6,6 +6,8 @@ on:
     paths:
       - "launcher/mac/**"
       - "vosyn-automation/requirements.txt"
+      - "vosyn-automation/src/**"
+      - "vosyn-automation/platform_router.py"
       - "university-job-portal/university-job-portal/package.json"
       - "university-job-portal/university-job-portal/package-lock.json"
       - ".github/workflows/test.yml"
