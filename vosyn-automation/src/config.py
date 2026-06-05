@@ -10,6 +10,10 @@ load_dotenv(BASE_DIR / ".env")
 
 def load_portal_urls() -> dict:
     """Load portal URLs from Turso."""
+    if not TursoDataManager.is_configured():
+        print("Warning: Turso is not configured; portal URLs unavailable")
+        return {}
+
     portal_urls = TursoDataManager().get_portal_url_map()
     if not portal_urls:
         print("Warning: No portal URLs found in Turso table 'portal_urls'")
