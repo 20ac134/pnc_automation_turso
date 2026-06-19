@@ -42,23 +42,11 @@ python src/main.py
 
 python -m src.playbooks.symplicity_playbook
 
-## Migrating Existing Supabase Data to Turso
+## Turso Data Storage
 
-If Turso is empty, keep your Turso variables in `.env` and add the old Supabase/Postgres URL under a separate name:
+The app reads and writes directly to Turso. Run the app once or run `python TestSetup.py` to create and verify the required tables.
 
-```env
-OLD_DATABASE_URL=postgresql://postgres.your_project:your_password@your_pooler_host:5432/postgres
-```
-
-Then run:
-
-```bash
-python scripts/migrate_supabase_to_turso.py
-```
-
-The script copies `job_posts`, `posting_runs`, `job_templates`, `portal_urls`, and `application_tracking` into Turso using upserts.
-
-## After Running the Script
+## After Running the Automation
 
 - The automation will navigate to the selected university portal and pre-fill the job posting form.
 

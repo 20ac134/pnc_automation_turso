@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -12,23 +12,34 @@ load_dotenv(BASE_DIR / ".env")
 
 FIELD_MAP = {
     "tracking_id": "TrackingId",
+    "university_job_id": "UniversityJobId",
     "job_id": "JobId",
     "job_title": "JobTitle",
     "portal_name": "PortalName",
-    "portal_display_name": "PortalDisplayName",
-    "portal_posting_id": "PortalPostingId",
+    "university": "University",
+    "country": "Country",
     "posting_status": "PostingStatus",
     "applicants_count": "ApplicantsCount",
     "last_applicants_count": "LastApplicantsCount",
     "new_applicants_count": "NewApplicantsCount",
-    "posted_at": "PostedAt",
-    "last_checked_at": "LastCheckedAt",
-    "proof_link": "ProofLink",
-    "notes": "Notes",
-    "last_run_id": "LastRunId",
-    "batch_id": "BatchId",
-    "created_at": "CreatedAt",
-    "updated_at": "UpdatedAt",
+    "submitted_date": "SubmittedDate",
+    "submitted_time": "SubmittedTime",
+}
+
+TRACKING_COLUMNS = list(FIELD_MAP.keys())
+
+LEGACY_TRACKING_COLUMNS = {
+    "portal_display_name",
+    "submitted_at",
+    "posted_at",
+    "last_checked_at",
+    "created_at",
+    "updated_at",
+    "portal_posting_id",
+    "proof_link",
+    "notes",
+    "last_run_id",
+    "batch_id",
 }
 
 
@@ -50,29 +61,8 @@ class TrackingManager:
         return TursoConnection.is_configured()
 
     def ensure_schema(self):
+        self._ensure_tracking_table()
         statements = [
-            """
-            CREATE TABLE IF NOT EXISTS application_tracking (
-                tracking_id TEXT PRIMARY KEY,
-                job_id TEXT NOT NULL,
-                job_title TEXT,
-                portal_name TEXT,
-                portal_display_name TEXT,
-                portal_posting_id TEXT,
-                posting_status TEXT DEFAULT 'POSTED',
-                applicants_count INTEGER DEFAULT 0,
-                last_applicants_count INTEGER DEFAULT 0,
-                new_applicants_count INTEGER DEFAULT 0,
-                posted_at TEXT,
-                last_checked_at TEXT,
-                proof_link TEXT,
-                notes TEXT,
-                last_run_id TEXT,
-                batch_id TEXT,
-                created_at TEXT,
-                updated_at TEXT
-            )
-            """,
             """
             CREATE INDEX IF NOT EXISTS idx_application_tracking_job_id
             ON application_tracking (job_id)
@@ -84,6 +74,10 @@ class TrackingManager:
             """
             CREATE INDEX IF NOT EXISTS idx_application_tracking_status
             ON application_tracking (posting_status)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_application_tracking_submitted
+            ON application_tracking (submitted_date, submitted_time)
             """,
         ]
 
@@ -97,110 +91,71 @@ class TrackingManager:
         job_title: str,
         portal_name: str,
         portal_display_name: str = "",
-        portal_posting_id: str = None,
-        proof_link: str = None,
+        country: str = "",
+        university_job_id: str = "",
         posting_status: str = "POSTED",
         applicants_count: int = 0,
+        submitted_at: str | datetime = None,
+        portal_posting_id: str = None,
+        proof_link: str = None,
         notes: str = None,
         run_id: str = None,
         batch_id: str = None,
         posted_at: str | datetime = None,
     ) -> Dict[str, Any]:
-        now = self._now()
         applicant_total = self._safe_int(applicants_count)
-        posted_timestamp = self._parse_timestamp(posted_at) or now
-        last_checked = now if applicant_total > 0 else None
-
-        if run_id:
-            existing = TursoConnection.fetch_one("""
-                SELECT *
-                FROM application_tracking
-                WHERE last_run_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (run_id,))
-
-            if existing:
-                TursoConnection.execute("""
-                    UPDATE application_tracking
-                    SET posting_status = :posting_status,
-                        portal_posting_id = COALESCE(:portal_posting_id, portal_posting_id),
-                        proof_link = COALESCE(:proof_link, proof_link),
-                        notes = COALESCE(:notes, notes),
-                        updated_at = :updated_at
-                    WHERE tracking_id = :tracking_id
-                """, {
-                    "tracking_id": existing["tracking_id"],
-                    "posting_status": self._status(posting_status),
-                    "portal_posting_id": portal_posting_id,
-                    "proof_link": proof_link,
-                    "notes": notes,
-                    "updated_at": now,
-                })
-                TursoConnection.commit()
-                return self.get_tracking_record(existing["tracking_id"])
+        submitted_timestamp = (
+            self._parse_timestamp(submitted_at)
+            or self._parse_timestamp(posted_at)
+            or datetime.now(timezone.utc).replace(microsecond=0)
+        )
 
         tracking_id = f"TRACK_{uuid.uuid4().hex[:10].upper()}"
         TursoConnection.execute("""
             INSERT INTO application_tracking (
                 tracking_id,
+                university_job_id,
                 job_id,
                 job_title,
                 portal_name,
-                portal_display_name,
-                portal_posting_id,
+                university,
+                country,
                 posting_status,
                 applicants_count,
                 last_applicants_count,
                 new_applicants_count,
-                posted_at,
-                last_checked_at,
-                proof_link,
-                notes,
-                last_run_id,
-                batch_id,
-                created_at,
-                updated_at
+                submitted_date,
+                submitted_time
             )
             VALUES (
                 :tracking_id,
+                :university_job_id,
                 :job_id,
                 :job_title,
                 :portal_name,
-                :portal_display_name,
-                :portal_posting_id,
+                :university,
+                :country,
                 :posting_status,
                 :applicants_count,
                 :last_applicants_count,
                 :new_applicants_count,
-                :posted_at,
-                :last_checked_at,
-                :proof_link,
-                :notes,
-                :last_run_id,
-                :batch_id,
-                :created_at,
-                :updated_at
+                :submitted_date,
+                :submitted_time
             )
         """, {
             "tracking_id": tracking_id,
+            "university_job_id": str(university_job_id or portal_posting_id or ""),
             "job_id": str(job_id),
             "job_title": str(job_title or job_id),
             "portal_name": str(portal_name).strip().lower(),
-            "portal_display_name": str(portal_display_name or portal_name),
-            "portal_posting_id": portal_posting_id,
+            "university": str(portal_display_name or portal_name),
+            "country": str(country or ""),
             "posting_status": self._status(posting_status),
             "applicants_count": applicant_total,
             "last_applicants_count": 0,
             "new_applicants_count": applicant_total,
-            "posted_at": posted_timestamp,
-            "last_checked_at": last_checked,
-            "proof_link": proof_link,
-            "notes": notes,
-            "last_run_id": run_id,
-            "batch_id": batch_id,
-            "created_at": now,
-            "updated_at": now,
+            "submitted_date": self._format_date_value(submitted_timestamp),
+            "submitted_time": self._format_time_value(submitted_timestamp),
         })
         TursoConnection.commit()
 
@@ -230,7 +185,11 @@ class TrackingManager:
             SELECT *
             FROM application_tracking
             {where_clause}
-            ORDER BY posted_at IS NULL, posted_at DESC, created_at DESC
+            ORDER BY
+                submitted_date IS NULL,
+                submitted_date DESC,
+                submitted_time DESC,
+                tracking_id DESC
         """, tuple(params))
 
         return [self._row_to_record(row) for row in rows]
@@ -271,7 +230,7 @@ class TrackingManager:
                 SELECT *
                 FROM application_tracking
                 WHERE job_id = ? AND portal_name = ?
-                ORDER BY created_at DESC
+                ORDER BY submitted_date DESC, submitted_time DESC, tracking_id DESC
                 LIMIT 1
             """, (str(job_id), str(portal_name).lower()))
 
@@ -279,15 +238,11 @@ class TrackingManager:
             raise ValueError("Tracking record not found")
 
         previous_total = self._safe_int(current["applicants_count"])
-        now = self._now()
         TursoConnection.execute("""
             UPDATE application_tracking
             SET last_applicants_count = :last_applicants_count,
                 applicants_count = :applicants_count,
                 new_applicants_count = :new_applicants_count,
-                last_checked_at = :last_checked_at,
-                updated_at = :updated_at,
-                notes = COALESCE(:notes, notes),
                 posting_status = COALESCE(:posting_status, posting_status)
             WHERE tracking_id = :tracking_id
         """, {
@@ -295,9 +250,6 @@ class TrackingManager:
             "last_applicants_count": previous_total,
             "applicants_count": applicant_total,
             "new_applicants_count": max(applicant_total - previous_total, 0),
-            "last_checked_at": now,
-            "updated_at": now,
-            "notes": notes,
             "posting_status": self._status(status) if status else None,
         })
         TursoConnection.commit()
@@ -335,11 +287,11 @@ class TrackingManager:
         by_portal = TursoConnection.fetch_all("""
             SELECT
                 portal_name AS PortalName,
-                portal_display_name AS PortalDisplayName,
+                university AS University,
                 COUNT(*) AS postings,
                 COALESCE(SUM(applicants_count), 0) AS applicants
             FROM application_tracking
-            GROUP BY portal_name, portal_display_name
+            GROUP BY portal_name, university
             ORDER BY applicants DESC, postings DESC
         """)
 
@@ -353,13 +305,158 @@ class TrackingManager:
             "by_portal": [self._clean_record(dict(row)) for row in by_portal],
         }
 
+    def _ensure_tracking_table(self):
+        table = TursoConnection.fetch_one("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'application_tracking'
+        """)
+
+        if not table:
+            TursoConnection.execute(self._create_table_sql("application_tracking"))
+            return
+
+        existing_columns = self._table_columns("application_tracking")
+        target_columns = set(TRACKING_COLUMNS)
+        needs_rebuild = (
+            bool(target_columns - existing_columns)
+            or bool(existing_columns & LEGACY_TRACKING_COLUMNS)
+            or bool(existing_columns - target_columns)
+        )
+        if needs_rebuild:
+            self._rebuild_tracking_table(existing_columns)
+
+    def _rebuild_tracking_table(self, existing_columns: set[str]):
+        temp_table = "application_tracking_migrated"
+        TursoConnection.execute(f"DROP TABLE IF EXISTS {temp_table}")
+        TursoConnection.execute(self._create_table_sql(temp_table))
+
+        insert_columns = ", ".join(TRACKING_COLUMNS)
+        select_expressions = ", ".join(
+            self._migration_expression(column, existing_columns)
+            for column in TRACKING_COLUMNS
+        )
+        TursoConnection.execute(f"""
+            INSERT INTO {temp_table} ({insert_columns})
+            SELECT {select_expressions}
+            FROM application_tracking
+        """)
+        TursoConnection.execute("DROP TABLE application_tracking")
+        TursoConnection.execute(f"ALTER TABLE {temp_table} RENAME TO application_tracking")
+
+    @staticmethod
+    def _create_table_sql(table_name: str) -> str:
+        return f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                tracking_id TEXT PRIMARY KEY,
+                university_job_id TEXT,
+                job_id TEXT NOT NULL,
+                job_title TEXT,
+                portal_name TEXT,
+                university TEXT,
+                country TEXT,
+                posting_status TEXT DEFAULT 'POSTED',
+                applicants_count INTEGER DEFAULT 0,
+                last_applicants_count INTEGER DEFAULT 0,
+                new_applicants_count INTEGER DEFAULT 0,
+                submitted_date TEXT,
+                submitted_time TEXT
+            )
+        """
+
+    @staticmethod
+    def _table_columns(table_name: str) -> set[str]:
+        rows = TursoConnection.fetch_all(f"PRAGMA table_info({table_name})")
+        return {str(row["name"]) for row in rows}
+
+    def _migration_expression(self, column: str, existing_columns: set[str]) -> str:
+        source_timestamp = self._source_timestamp_expression(existing_columns)
+        portal_name_expr = self._coalesce(existing_columns, ["portal_name"], "''")
+        posting_status_expr = self._coalesce(existing_columns, ["posting_status"], "'POSTED'")
+
+        expressions = {
+            "tracking_id": self._coalesce(
+                existing_columns,
+                ["tracking_id"],
+                "'TRACK_' || upper(substr(hex(randomblob(8)), 1, 10))",
+            ),
+            "university_job_id": self._coalesce(
+                existing_columns,
+                ["university_job_id", "portal_posting_id"],
+                "''",
+            ),
+            "job_id": self._coalesce(existing_columns, ["job_id"], "''"),
+            "job_title": self._coalesce(existing_columns, ["job_title", "job_id"], "''"),
+            "portal_name": f"lower({portal_name_expr})",
+            "university": self._coalesce(
+                existing_columns,
+                ["university", "portal_display_name", "portal_name"],
+                "''",
+            ),
+            "country": self._coalesce(existing_columns, ["country"], "''"),
+            "posting_status": f"upper({posting_status_expr})",
+            "applicants_count": self._coalesce(existing_columns, ["applicants_count"], "0"),
+            "last_applicants_count": self._coalesce(existing_columns, ["last_applicants_count"], "0"),
+            "new_applicants_count": self._coalesce(existing_columns, ["new_applicants_count"], "0"),
+            "submitted_date": self._submitted_part_expression(
+                "submitted_date",
+                "date",
+                source_timestamp,
+                existing_columns,
+            ),
+            "submitted_time": self._submitted_part_expression(
+                "submitted_time",
+                "time",
+                source_timestamp,
+                existing_columns,
+            ),
+        }
+        return expressions[column]
+
+    @staticmethod
+    def _source_timestamp_expression(existing_columns: set[str]) -> str | None:
+        timestamp_columns = [
+            column
+            for column in ["submitted_at", "posted_at", "created_at", "updated_at"]
+            if column in existing_columns
+        ]
+        if not timestamp_columns:
+            return None
+        expressions = [f"NULLIF({column}, '')" for column in timestamp_columns]
+        if len(expressions) == 1:
+            return expressions[0]
+        return "COALESCE(" + ", ".join(expressions) + ")"
+
+    @staticmethod
+    def _submitted_part_expression(
+        column: str,
+        sql_function: str,
+        source_timestamp: str | None,
+        existing_columns: set[str],
+    ) -> str:
+        if column in existing_columns and source_timestamp:
+            return f"COALESCE(NULLIF({column}, ''), {sql_function}({source_timestamp}))"
+        if column in existing_columns:
+            return f"NULLIF({column}, '')"
+        if source_timestamp:
+            return f"{sql_function}({source_timestamp})"
+        return "NULL"
+
+    @staticmethod
+    def _coalesce(existing_columns: set[str], candidates: List[str], default: str) -> str:
+        expressions = [
+            f"NULLIF({column}, '')"
+            for column in candidates
+            if column in existing_columns
+        ]
+        expressions.append(default)
+        if len(expressions) == 1:
+            return expressions[0]
+        return "COALESCE(" + ", ".join(expressions) + ")"
+
     @staticmethod
     def _status(value: str | None) -> str:
         return str(value or "POSTED").upper()
-
-    @staticmethod
-    def _now() -> str:
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     @staticmethod
     def _safe_int(value: Any) -> int:
@@ -371,20 +468,51 @@ class TrackingManager:
             return 0
 
     @staticmethod
-    def _parse_timestamp(value: str | datetime = None) -> Optional[str]:
+    def _parse_timestamp(value: str | datetime = None) -> Optional[datetime]:
         if value is None or value == "":
             return None
         if isinstance(value, datetime):
             parsed = value
+        elif isinstance(value, date):
+            parsed = datetime.combine(value, time.min)
         else:
-            try:
-                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            except ValueError:
+            text = str(value).strip()
+            if not text:
                 return None
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    parsed = datetime.combine(date.fromisoformat(text), time.min)
+                except ValueError:
+                    return None
 
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.replace(microsecond=0).isoformat()
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc)
+        return parsed.replace(microsecond=0)
+
+    @classmethod
+    def _format_date_value(cls, value: Any) -> Optional[str]:
+        parsed = cls._parse_timestamp(value)
+        if parsed:
+            return parsed.strftime("%Y-%m-%d")
+        if isinstance(value, date):
+            return value.strftime("%Y-%m-%d")
+        text = str(value).strip() if value is not None else ""
+        return text or None
+
+    @classmethod
+    def _format_time_value(cls, value: Any) -> Optional[str]:
+        if isinstance(value, time):
+            return value.strftime("%H:%M:%S")
+        parsed = cls._parse_timestamp(value)
+        if parsed:
+            return parsed.strftime("%H:%M:%S")
+        text = str(value).strip() if value is not None else ""
+        try:
+            return time.fromisoformat(text).strftime("%H:%M:%S") if text else None
+        except ValueError:
+            return text or None
 
     def _row_to_record(self, row) -> Dict[str, Any]:
         record = {}
@@ -398,6 +526,12 @@ class TrackingManager:
         for key, value in record.items():
             if isinstance(value, datetime):
                 cleaned[key] = value.isoformat()
+            elif isinstance(value, (date, time)):
+                cleaned[key] = value.isoformat()
+            elif value is None:
+                cleaned[key] = None
+            elif isinstance(value, str) and value.strip() == "":
+                cleaned[key] = None
             else:
                 cleaned[key] = value
         return cleaned

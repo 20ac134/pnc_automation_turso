@@ -53,6 +53,8 @@ COUNTRY_NAMES: dict[str, str] = {
     "uk": "United Kingdom",
 }
 
+PENDING_APPROVAL_STATUS = "PENDING_APPROVAL"
+
 
 def read_data_sheet(sheet: str):
     return TursoDataManager().read_sheet(sheet)
@@ -93,6 +95,10 @@ def record_tracking_for_run(run_id: str, posting_status: str = "POSTED", result:
             return None
         run_snapshot = dict(run)
 
+    existing_tracking_id = run_snapshot.get("tracking_id")
+    if existing_tracking_id:
+        return TrackingManager().get_tracking_record(existing_tracking_id)
+
     confirmation_id = result.get("confirmation_id")
     if confirmation_id == "NOT_SUBMITTED":
         confirmation_id = None
@@ -102,11 +108,10 @@ def record_tracking_for_run(run_id: str, posting_status: str = "POSTED", result:
         job_title=run_snapshot.get("job_title", ""),
         portal_name=run_snapshot.get("portal_key") or run_snapshot.get("portal", ""),
         portal_display_name=run_snapshot.get("portal", ""),
-        portal_posting_id=confirmation_id,
-        proof_link=result.get("screenshot_path"),
+        country=run_snapshot.get("country", ""),
+        university_job_id=confirmation_id,
         posting_status=posting_status,
-        run_id=run_id,
-        batch_id=run_snapshot.get("batch_id"),
+        submitted_at=run_snapshot.get("submitted_at") or run_snapshot.get("finished_at"),
     )
 
     with JOB_STORE_LOCK:
@@ -129,6 +134,10 @@ def safe_record_tracking_for_run(run_id: str, posting_status: str = "POSTED", re
 class SubmitRequest(BaseModel):
     portal_key: str
     job_id: str
+    country: str | None = None
+    university_name: str | None = None
+    job_title: str | None = None
+    submitted_at: str | None = None
 
 
 class TrackingCreateRequest(BaseModel):
@@ -136,11 +145,12 @@ class TrackingCreateRequest(BaseModel):
     portal_name: str
     job_title: str | None = None
     portal_display_name: str | None = None
+    country: str | None = None
+    university_job_id: str | None = None
     portal_posting_id: str | None = None
     posting_status: str = "POSTED"
     applicants_count: int = 0
-    proof_link: str | None = None
-    notes: str | None = None
+    submitted_at: str | None = None
     posted_at: str | None = None
 
 
@@ -240,6 +250,16 @@ def submit_application(payload: SubmitRequest, background_tasks: BackgroundTasks
             raise HTTPException(status_code=422, detail=f"No playbook for platform '{platform}'")
 
         display_names = get_portal_display_names()
+        portal_countries = get_portal_countries()
+        portal_country_code = portal_countries.get(payload.portal_key, "")
+        country_name = str(
+            payload.country or COUNTRY_NAMES.get(portal_country_code, portal_country_code)
+        ).strip()
+        portal_display_name = str(
+            payload.university_name or display_names.get(payload.portal_key, payload.portal_key)
+        ).strip()
+        tracking_job_title = str(payload.job_title or job.get("Title", payload.job_id)).strip()
+        submitted_at = payload.submitted_at or datetime.now().isoformat()
 
         job_data = {
             "JobId":        payload.job_id,
@@ -264,14 +284,29 @@ def submit_application(payload: SubmitRequest, background_tasks: BackgroundTasks
             JOB_STORE[run_id] = {
                 "status":      "running",
                 "portal_key":  payload.portal_key,
-                "portal":      display_names.get(payload.portal_key, payload.portal_key),
+                "portal":      portal_display_name,
+                "country":     country_name,
                 "job_id":      payload.job_id,
-                "job_title":   job["Title"],
+                "job_title":   tracking_job_title,
                 "platform":    platform,
                 "message":     "Playbook is running...",
                 "started_at":  datetime.now().isoformat(),
                 "finished_at": None,
+                "submitted_at": submitted_at,
             }
+
+        tracking_record = TrackingManager().record_application_posting(
+            job_id=payload.job_id,
+            job_title=tracking_job_title,
+            portal_name=payload.portal_key,
+            portal_display_name=portal_display_name,
+            country=country_name,
+            posting_status=PENDING_APPROVAL_STATUS,
+            submitted_at=submitted_at,
+        )
+        with JOB_STORE_LOCK:
+            JOB_STORE[run_id]["tracking_id"] = tracking_record.get("TrackingId")
+            JOB_STORE[run_id]["tracking_recorded"] = True
 
         def run_playbook():
             try:
@@ -306,9 +341,10 @@ def submit_application(payload: SubmitRequest, background_tasks: BackgroundTasks
         return {
             "run_id":   run_id,
             "status":   "running",
-            "portal":   display_names.get(payload.portal_key, payload.portal_key),
+            "portal":   portal_display_name,
             "job_id":   payload.job_id,
             "platform": platform,
+            "tracking_id": tracking_record.get("TrackingId"),
         }
 
     except HTTPException:
@@ -340,7 +376,10 @@ def confirm_run(run_id: str):
         JOB_STORE[run_id]["message"]     = "Manually confirmed via UI"
         JOB_STORE[run_id]["finished_at"] = datetime.now().isoformat()
 
-    tracking_record = safe_record_tracking_for_run(run_id, "POSTED")
+    tracking_id = job.get("tracking_id")
+    tracking_record = TrackingManager().get_tracking_record(tracking_id) if tracking_id else None
+    if not tracking_record:
+        tracking_record = safe_record_tracking_for_run(run_id, "POSTED")
 
     print(f"[API] Run {run_id} manually confirmed")
     return {
@@ -399,12 +438,11 @@ def create_tracking_record(payload: TrackingCreateRequest):
             job_title=job_title,
             portal_name=payload.portal_name,
             portal_display_name=payload.portal_display_name or payload.portal_name,
-            portal_posting_id=payload.portal_posting_id,
-            proof_link=payload.proof_link,
+            country=payload.country or "",
+            university_job_id=payload.university_job_id or payload.portal_posting_id or "",
             posting_status=payload.posting_status,
             applicants_count=payload.applicants_count,
-            notes=payload.notes,
-            posted_at=payload.posted_at,
+            submitted_at=payload.submitted_at or payload.posted_at,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -450,6 +488,10 @@ def get_tracking_record(tracking_id: str):
 class BatchJobItem(BaseModel):
     portal_key: str
     job_id: str
+    country: str | None = None
+    university_name: str | None = None
+    job_title: str | None = None
+    submitted_at: str | None = None
 
 class BatchSubmitRequest(BaseModel):
     jobs: list[BatchJobItem]
@@ -466,6 +508,7 @@ def submit_batch(payload: BatchSubmitRequest, background_tasks: BackgroundTasks)
 
     em = TursoDataManager()
     display_names = get_portal_display_names()
+    portal_countries = get_portal_countries()
 
     # Validate all jobs upfront
     validated = []
@@ -473,10 +516,20 @@ def submit_batch(payload: BatchSubmitRequest, background_tasks: BackgroundTasks)
         job = em.get_job(item.job_id)
         if not job:
             raise HTTPException(status_code=404, detail=f"Job '{item.job_id}' not found")
+        portal_country_code = portal_countries.get(item.portal_key, "")
+        country_name = str(
+            item.country or COUNTRY_NAMES.get(portal_country_code, portal_country_code)
+        ).strip()
+        portal_display_name = str(
+            item.university_name or display_names.get(item.portal_key, item.portal_key)
+        ).strip()
         validated.append({
-            "portal_key": item.portal_key,
-            "job_id":     item.job_id,
-            "job_title":  str(job.get("Title", item.job_id)),
+            "portal_key":          item.portal_key,
+            "job_id":              item.job_id,
+            "job_title":           str(item.job_title or job.get("Title", item.job_id)),
+            "portal_display_name": portal_display_name,
+            "country":             country_name,
+            "submitted_at":        item.submitted_at or datetime.now().isoformat(),
         })
 
     batch_id = str(uuid.uuid4())
@@ -487,15 +540,29 @@ def submit_batch(payload: BatchSubmitRequest, background_tasks: BackgroundTasks)
             JOB_STORE[run_id] = {
                 "status":      "pending",
                 "portal_key":  v["portal_key"],
-                "portal":      display_names.get(v["portal_key"], v["portal_key"]),
+                "portal":      v["portal_display_name"],
+                "country":     v["country"],
                 "job_id":      v["job_id"],
                 "job_title":   v["job_title"],
                 "platform":    "",
                 "message":     "Waiting to start...",
                 "started_at":  None,
                 "finished_at": None,
+                "submitted_at": v["submitted_at"],
                 "batch_id":    batch_id,
             }
+        tracking_record = TrackingManager().record_application_posting(
+            job_id=v["job_id"],
+            job_title=v["job_title"],
+            portal_name=v["portal_key"],
+            portal_display_name=v["portal_display_name"],
+            country=v["country"],
+            posting_status=PENDING_APPROVAL_STATUS,
+            submitted_at=v["submitted_at"],
+        )
+        with JOB_STORE_LOCK:
+            JOB_STORE[run_id]["tracking_id"] = tracking_record.get("TrackingId")
+            JOB_STORE[run_id]["tracking_recorded"] = True
         batch_jobs.append({**v, "run_id": run_id})
 
     with BATCH_STORE_LOCK:
@@ -614,7 +681,16 @@ def submit_batch(payload: BatchSubmitRequest, background_tasks: BackgroundTasks)
         "batch_id": batch_id,
         "status":   "running",
         "total":    len(batch_jobs),
-        "jobs":     [{"run_id": j["run_id"], "portal": j["portal_key"], "job_id": j["job_id"]} for j in batch_jobs],
+        "jobs":     [
+            {
+                "run_id": j["run_id"],
+                "portal_key": j["portal_key"],
+                "portal": j["portal_display_name"],
+                "job_id": j["job_id"],
+                "job_title": j["job_title"],
+            }
+            for j in batch_jobs
+        ],
     }
 
 
@@ -633,7 +709,7 @@ def get_batch_status(batch_id: str):
             info = JOB_STORE.get(item["run_id"], {})
         jobs_status.append({
             "run_id":    item["run_id"],
-            "portal":    display_names.get(item["portal_key"], item["portal_key"]),
+            "portal":    item.get("portal_display_name") or display_names.get(item["portal_key"], item["portal_key"]),
             "job_id":    item["job_id"],
             "job_title": item["job_title"],
             "status":    info.get("status", "pending"),
