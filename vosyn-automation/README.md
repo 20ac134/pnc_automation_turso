@@ -17,8 +17,47 @@ Automated job posting system for 21 Canadian university portals.
 
 # Vosyn Portal Credentials
 # IMPORTANT: Fill in your actual credentials, never commit this file!
-PORTAL_USER=your_portal_email
-PORTAL_PASS=your_portal_password
+LAURENTIAN_USER=careers@vosyn.ai LAURENTIAN_PASS=@HRvoSYn123*!
+
+SFU_USER=careers@vosyn.ai SFU_PASS=@HRvoSYn123*!
+
+CONCORDIA_USER=careers@vosyn.ai CONCORDIA_PASS=@HRvoSYn123*!
+
+SASKATCHEWAN_USER=careers@vosyn.ai SASKATCHEWAN_PASS=@HRvoSYn123*!
+
+UNB_USER=careers@vosyn.ai UNB_PASS=@HRvoSYn123*!
+
+MTA_USER=careers@vosyn.ai MTA_PASS=@HRvoSYn123*!
+
+WLU_USER=careers@vosyn.ai WLU_PASS=@HRvoSYn123*!
+
+REGINA_USER=careers@vosyn.ai REGINA_PASS=@HRvoSYn123*!
+
+ROYALROADS_USER=careers@vosyn.ai ROYALROADS_PASS=@HRvoSYn123*!
+
+TALENTHQ_USER=careers@vosyn.ai TALENTHQ_PASS=@HRvoSYn123*!
+
+OUTCOMECAMPUSCONNECT_USER=careers@vosyn.ai OUTCOMECAMPUSCONNECT_PASS=@HRvoSYn123*!
+
+GUELPH_USER=careers@vosyn.ai GUELPH_PASS=@HRvoSYn123*!
+
+QUEENS_USER=careers@vosyn.ai QUEENS_PASS=@HRvoSYn123*!
+
+MUN_USER=careers@vosyn.ai MUN_PASS=@HRvoSYn123*!
+
+OTTAWA_USER=careers@vosyn.ai OTTAWA_PASS=@HRvoSYn123*!
+
+POLYMTL_USER=careers@vosyn.ai POLYMTL_PASS=@HRvoSYn123*!
+
+HEC_USER=careers@vosyn.ai HEC_PASS=@HRvoSYn123*!
+
+TRENTU_USER=careers@vosyn.ai TRENTU_PASS=@HRvoSYn123*!
+
+SHERBROOKE_USER=careers@vosyn.ai SHERBROOKE_PASS=@HRvoSYn123*!
+
+VIU_USER=careers@vosyn.ai VIU_PASS=@HRvoSYn123*!
+
+UCN_USER = careers@vosyn.ai UCN_PASS = @HRvoSYn123*!
 
 # Turso/libSQL
 TURSO_DATABASE_URL=libsql://your-database-your-org.turso.io

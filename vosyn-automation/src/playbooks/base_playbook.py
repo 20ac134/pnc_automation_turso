@@ -2,9 +2,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import undetected_chromedriver as uc
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 
 import time
 import random
+import os
+import shutil
+import platform
+import subprocess
+import re
 from datetime import datetime
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -27,6 +34,96 @@ class BasePortalPlaybook(ABC):
         self.wait = None
         self.run_id = None  # Set by API when running via frontend
 
+    @staticmethod
+    def _get_chrome_major_version() -> int | None:
+        """Detect installed Chrome version across macOS, Windows, and Linux."""
+        system_os = platform.system()
+
+        if system_os == "Darwin":
+            try:
+                out = subprocess.check_output(
+                    ["defaults", "read", "/Applications/Google Chrome.app/Contents/Info.plist", "CFBundleShortVersionString"],
+                    stderr=subprocess.DEVNULL
+                ).decode().strip()
+                match = re.search(r"^(\d+)\.", out)
+                if match:
+                    return int(match.group(1))
+            except Exception:
+                pass
+
+        elif system_os == "Windows":
+            try:
+                import winreg
+                keys = [
+                    (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome")
+                ]
+                for root, path in keys:
+                    try:
+                        with winreg.OpenKey(root, path) as key:
+                            try:
+                                val, _ = winreg.QueryValueEx(key, "version")
+                                match = re.search(r"^(\d+)\.", str(val))
+                                if match:
+                                    return int(match.group(1))
+                            except FileNotFoundError:
+                                pass
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "google-chrome",
+            "chromium-browser",
+            "chromium",
+        ]
+
+        for cmd in candidates:
+            try:
+                out = subprocess.check_output(
+                    [cmd, "--version"],
+                    stderr=subprocess.DEVNULL
+                ).decode()
+
+                match = re.search(r"(\d+)\.\d+\.\d+", out)
+                if match:
+                    return int(match.group(1))
+            except Exception:
+                continue
+
+        return None
+
+    @staticmethod
+    def _clear_uc_cache():
+        """Clear undetected_chromedriver's downloaded binary cache after version conflicts."""
+        system_os = platform.system()
+        paths_to_clear = []
+        home = Path.home()
+
+        if system_os == "Darwin":
+            paths_to_clear.append(home / "Library" / "Application Support" / "undetected_chromedriver")
+        elif system_os == "Windows":
+            appdata = os.environ.get("APPDATA")
+            localappdata = os.environ.get("LOCALAPPDATA")
+            if appdata:
+                paths_to_clear.append(Path(appdata) / "undetected_chromedriver")
+            if localappdata:
+                paths_to_clear.append(Path(localappdata) / "undetected_chromedriver")
+        else:
+            paths_to_clear.append(home / ".config" / "undetected_chromedriver")
+            paths_to_clear.append(home / ".local" / "share" / "undetected_chromedriver")
+
+        for path in paths_to_clear:
+            if path.exists():
+                try:
+                    print(f"Clearing stale chromedriver cache directory: {path}")
+                    shutil.rmtree(path, ignore_errors=True)
+                except Exception as e:
+                    print(f"Could not clear cache at {path}: {e}")
+
     def setup_driver(self):
         user_data_dir = tempfile.mkdtemp(prefix="uc_profile_")
         options = uc.ChromeOptions()
@@ -38,9 +135,42 @@ class BasePortalPlaybook(ABC):
         
         prefs = {"profile.default_content_setting_values.notifications": 2}
         options.add_experimental_option("prefs", prefs)
-        with _DRIVER_INIT_LOCK:
 
-            self.driver = uc.Chrome(options=options, version_main=147)
+        chrome_version = self._get_chrome_major_version()
+        if chrome_version:
+            print(f"Detected Chrome version: {chrome_version}")
+        else:
+            print("Could not detect Chrome version, letting uc auto-detect")
+
+        with _DRIVER_INIT_LOCK:
+            try:
+                self.driver = uc.Chrome(
+                    options=options,
+                    version_main=chrome_version,
+                    driver_executable_path=None,
+                    use_subprocess=True,
+                )
+            except Exception as e:
+                print(f"Primary driver init failed: {e}")
+                print("Initiating self-healing routine (clearing downloaded caches)...")
+                self._clear_uc_cache()
+                os.environ["UC_DRIVER_CACHE"] = "0"
+
+                try:
+                    self.driver = uc.Chrome(
+                        options=options,
+                        version_main=chrome_version,
+                        driver_executable_path=None,
+                        use_subprocess=True,
+                    )
+                except Exception as retry_error:
+                    print(f"Secondary driver init failed: {retry_error}")
+                    print("Attempting final fallback using framework auto-detection parameters...")
+                    self.driver = uc.Chrome(
+                        options=options,
+                        driver_executable_path=None,
+                        use_subprocess=True,
+                    )
         
         self.wait = WebDriverWait(self.driver, 15)
         
